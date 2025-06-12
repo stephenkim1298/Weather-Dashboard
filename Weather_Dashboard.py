@@ -112,28 +112,41 @@ with first_tab:
         temp_display = temp_c * 9/5 + 32 if to_fahrenheit else temp_c
         temp_unit = "°F" if to_fahrenheit else "°C"
     
-        with st.sidebar.expander("🚨 Current weather condition alerts", expanded = False):
+        with st.sidebar.expander("🚨 Current conditions & Alerts", expanded = False):
+            st.markdown("Current conditions")
+            st.write(f"Temperature: **{temp_display:.1f}{temp_unit}**")
+            st.write(f"Wind Speed: **{wind_speed_mph:.1f}** mph")
+            if uv_index is not None:
+                st.write(f"UV Index: **{uv_index:.1f}**")
+            st.write(f"Precipitation: **{precip_in:.1f}** inches")
+
+            st.markdown("---")
+            st.markdown("### ⚠️ Alerts")
+            any_alert = False
+
+
             # Temperature alerts
             if to_fahrenheit:
                 if temp_display > 85:
-                    st.error(f"🌡️ **High Temp Alert:** {temp_display:.2f}{temp_unit} - Crop stress likely.")
+                    st.error(f"🌡️ **High Temp Alert:** {temp_display:.1f}{temp_unit} - Crop stress likely.")
             else:
                 if temp_display > 29:
-                    st.error(f"🌡️**High Temp Alert:** {temp_display:.2f}{temp_unit} - Crop stress likely.")
+                    st.error(f"🌡️**High Temp Alert:** {temp_display:.1f}{temp_unit} - Crop stress likely.")
             
             # UV alerts
             if uv_index is not None:
                 if uv_index >= 8:
-                    st.error(f"☀️ **Extreme UV Index:** {uv_index:.2f} - Shade vulnerable crops.")
+                    st.error(f"☀️ **Extreme UV Index:** {uv_index:.1f} - Shade vulnerable crops.")
                 elif uv_index >= 6:
-                    st.error(f"🕶️ **High UV today**: {uv_index:.2f} - Sun protection advised.")
+                    st.error(f"🕶️ **High UV today**: {uv_index:.1f} - Sun protection advised.")
 
             # Wind alert
             if wind_speed_mph > 25:
-                st.error(f"💨 **Strong winds warning**: {wind_speed_mph:.2f} - May affect young or shallow crops")
+                st.error(f"💨 **Strong winds warning**: {wind_speed_mph:.1f} mph - May affect young or shallow crops")
 
             if precip_in >= 0.5:
-                st.info(f"🌧️ **Rain detected:** {precip_in:.2f} inches in last hour -    Monitor soil moisture") 
+                st.info(f"🌧️ **Rain detected:** {precip_in:.1f} inches in last hour -    Monitor soil moisture") 
+            
 
 
     # Gets the predicted data
@@ -188,9 +201,17 @@ with first_tab:
             map.add_child(folium.LatLngPopup())
             map_display = st_folium(map, height = 500)
 
+
+            # Adds marker on last clicked area
             if map_display and "last_clicked" in map_display and map_display["last_clicked"]:
-                lat = map_display["last_clicked"]["lat"]
-                lon = map_display["last_clicked"]["lng"]
+                clicked_lat = map_display["last_clicked"]["lat"]
+                clicked_lon = map_display["last_clicked"]["lng"]
+                folium.Marker(
+                    location = [clicked_lat, clicked_lon],
+                    popup = f"Clicked: ({clicked_lat:.3f}, {clicked_lon:.3f})",
+                    icon = folium.Icon(color = "red", icon = "map-pin")
+                ).add_to(map)
+
 
         with right_column:
             st.success(f"Showing data for {lat:.3f}, {lon:.3f}")
