@@ -14,8 +14,9 @@ Api_key = "b512ece5d83613e319c1c55a2055f5be"
 switch_unit = st.sidebar.radio("Select Temperature Unit", ["Celsius (°C)", "Fahrenheit (°F)"])
 default_lat, default_lon = 27.8, -97.4
 user_input = st.sidebar.text_input("Enter a city", value = "Corpus Christi")
+
 var_select = st.sidebar.multiselect("Select to display",
-                ["Temperature", "Humidity", "Wind", "Precipitation","Soil Temp", "UV Index"], default =["Temperature"])
+                ["Temperature", "Humidity", "Wind", "Precipitation","Soil Temp", "UV Index", "Solar Radiation"], default =["Temperature"])
 
 
 
@@ -34,7 +35,8 @@ with first_tab:
         "Wind" : "Wind Speed (mph)",
         "Precipitation" : "Precipitation (in)",
         "Soil Temp" : "Soil Temp (C)",
-        "UV Index" : "UV Index"
+        "UV Index" : "UV Index",
+        "Solar Radiation" : "Solar Radiation (W/m^2)"
                 }
 
 # For entering the name in the map
@@ -68,7 +70,7 @@ with first_tab:
         factors = {
             "latitude": lat,
             "longitude": lon,
-            "hourly" : "soil_temperature_0cm,uv_index",
+            "hourly" : "soil_temperature_0cm,uv_index,shortwave_radiation",
             "start_date" : start_date,
             "end_date" : end_date,
             "timezone" : "auto"
@@ -82,7 +84,8 @@ with first_tab:
                 return mateo_df.rename(columns={
                     "time" : "Time",
                     "soil_temperature_0cm" : "Soil Temp (C)",
-                    "uv_index" : "UV Index"
+                    "uv_index" : "UV Index",
+                    "shortwave_radiation" : "Solar Radiation (W/m^2)"
             })
         return pd.DataFrame()
 
@@ -107,7 +110,7 @@ with first_tab:
         return None
 
   #Gives alerts depending on current/forecasted weather
-    def alerts (temp_c, wind_speed_mph, uv_index = None, precip_in = 0):
+    def alerts (temp_c, wind_speed_mph, humidity, soil_temperature_0cm, uv_index = None, precip_in = 0, solar_radiation = None):
         to_fahrenheit = switch_unit == "Fahrenheit (°F)"
         temp_display = temp_c * 9/5 + 32 if to_fahrenheit else temp_c
         temp_unit = "°F" if to_fahrenheit else "°C"
@@ -116,6 +119,10 @@ with first_tab:
             st.markdown("Current conditions")
             st.write(f"Temperature: **{temp_display:.1f}{temp_unit}**")
             st.write(f"Wind Speed: **{wind_speed_mph:.1f}** mph")
+            st.write(f"Soil Temperature (C): **{soil_temperature_0cm}{temp_unit}**")
+            st.write(f"Humidity: **{humidity}**%")
+            if solar_radiation is not None:
+                st.write(f"Solar Radiation: **{solar_radiation:.1f} W/m^2")
             if uv_index is not None:
                 st.write(f"UV Index: **{uv_index:.1f}**")
             st.write(f"Precipitation: **{precip_in:.1f}** inches")
@@ -139,7 +146,10 @@ with first_tab:
                     st.error(f"☀️ **Extreme UV Index:** {uv_index:.1f} - Shade vulnerable crops.")
                 elif uv_index >= 6:
                     st.error(f"🕶️ **High UV today**: {uv_index:.1f} - Sun protection advised.")
-
+            # Solar Radiation alert
+            if solar_radiation is not None:
+                if solar_radiation >=2600:
+                    st.error(f"**High Solar Radiation:** {solar_radiation:.1f} W/m^2 - Risk of evapotranspiration stress.")
             # Wind alert
             if wind_speed_mph > 25:
                 st.error(f"💨 **Strong winds warning**: {wind_speed_mph:.1f} mph - May affect young or shallow crops")
@@ -199,23 +209,22 @@ with first_tab:
             st.markdown("Interactable Map")
             map = folium.Map(location=[lat, lon], zoom_start=7)
             map.add_child(folium.LatLngPopup())
-            map_display = st_folium(map, height = 500)
 
+            map_display = st_folium(map, height = 500)
 
             # Adds marker on last clicked area
             if map_display and "last_clicked" in map_display and map_display["last_clicked"]:
-                clicked_lat = map_display["last_clicked"]["lat"]
-                clicked_lon = map_display["last_clicked"]["lng"]
+                lat = map_display["last_clicked"]["lat"]
+                lon = map_display["last_clicked"]["lng"]
                 folium.Marker(
-                    location = [clicked_lat, clicked_lon],
-                    popup = f"Clicked: ({clicked_lat:.3f}, {clicked_lon:.3f})",
+                    location = [lat, lon],
+                    popup = f"Clicked: ({lat:.3f}, {lon:.3f})",
                     icon = folium.Icon(color = "red", icon = "map-pin")
                 ).add_to(map)
 
 
-        with right_column:
-            st.success(f"Showing data for {lat:.3f}, {lon:.3f}")
 
+        with right_column:
             weather = rt_weather(lat, lon)
             prediction_df = get_forecast(lat, lon)
             meteo_data = open_mateo_dat(lat, lon, start_date, end_date)
@@ -255,6 +264,8 @@ with first_tab:
                 alerts(
                     temp_c = weather["temp_c"],
                     wind_speed_mph = weather["wind_speed_mph"],
+                    humidity = weather["humidity"],
+                    soil_temperature_0cm = weather["temp_c"],
                     uv_index = mateo_uv,
                     precip_in = weather["precip_in"]
                 )
@@ -274,6 +285,8 @@ with first_tab:
                     avail_column.append("Soil Temp Display")
                 if "UV Index" in prediction_df.columns:
                     avail_column.append("UV Index")
+                if "Solar Radiation (W/m^2)" in prediction_df.columns:
+                    avail_column.append("Solar Radiation (W/m^2)")
 
 
 
@@ -285,7 +298,8 @@ with first_tab:
                     "Wind" : filtering["Wind"],                    
                     "Precipitation" : filtering["Precipitation"],
                     "Soil Temp Display" : filtering["Soil Temp"],
-                    "UV Index" : filtering["UV Index"]
+                    "UV Index" : filtering["UV Index"],
+                    "Solar Radiation (W/m^2)" : filtering["Solar Radiation"]
                     }                                          
                                                                                                         )
                 horiz_filter_columun = pd.melt(horiz_columns, id_vars=["Time"], var_name = 'Metric', value_name="Value")
@@ -377,8 +391,7 @@ with first_tab:
                 prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply (lambda x : convert_temp (x, switch_unit == "Fahrenheit (°F)"))
                 if "Soil Temp (C)" in prediction_df.columns:
                     prediction_df["Soil Temp Display"] = prediction_df["Soil Temp (C)"].apply(lambda x: convert_temp(x, to_faren))
-
-
+                    
                 avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
                 if "Soil Temp Display" in prediction_df.columns:
                     avail_column.append("Soil Temp Display")
