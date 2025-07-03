@@ -18,7 +18,7 @@ switch_unit = st.sidebar.radio("Temperature Unit", ["Fahrenheit (°F)", "Celsius
 today = date.today()
 default_start = today - timedelta(days=0)
 default_end = today + timedelta(days=3)
-layout_toggle = st.sidebar.radio("Layout Mode", ["Horizontal", "Vertical"])
+#layout_toggle = st.sidebar.radio("Layout Mode", ["Horizontal", "Vertical"])
 
 start_date, end_date = st.sidebar.date_input(
     "📅 Date Range:",
@@ -164,20 +164,20 @@ with first_tab:
         st.session_state.selected_depths = selected_depths
         melted = melted[melted["Depth"].isin(selected_depths)]
 
-        with st.expander("⚠️ Soil Moisture Alerts", expanded=False):
+        with st.sidebar.expander("⚠️ Soil Moisture Alerts", expanded=False):
             recent_row = fnl_table.sort_values("Time").dropna().iloc[-1]
             for depth in available_depths:
                 col_name = f"{depth} Moisture (%)"
                 if col_name in recent_row:
                     moisture_val = recent_row[col_name]
                     if moisture_val < 15:
-                        st.error(f"Dry Alert at {depth}: {moisture_val:.1f}% - Cotton under stress")
+                        st.error(f"Low moisture at {depth}: {moisture_val:.1f}% - Cotton under stress")
                     elif moisture_val > 40:
-                        st.error(f"Wet Alert at {depth}: {moisture_val:.1f}% - Risk of root rot and poor aeration")
+                        st.error(f"Excessive moisture at {depth}: {moisture_val:.1f}% - Risk of root rot and poor aeration")
                     elif 20 <= moisture_val <= 35:
                         st.success(f"Optimal moisture at {depth}: {moisture_val:.1f}%")
                     else:
-                        st.info(f"Moisture level is {moisture_val:.1f}% at {depth} - Monitor closely")
+                        st.info(f"Borderline moisture at {depth}: {moisture_val:.1f}% - Monitor closely")
 
 
         # Displays the corresponding data depending on whether the user selected moisture or temperature
@@ -202,19 +202,22 @@ with first_tab:
         # Filter data by selected date range
         melted = melted[(melted["Time"].dt.date >= start_date) & (melted["Time"].dt.date <= end_date)]
 
-
-        # Displays the graph
-        if display == "Graph":
-            fig = px.line(
-                melted,
-                x = "Time",
-                y=y_axis,                        
-                color  ="Depth",
-                markers = True,
-                title = f"Soil {view} Over Time")
-            st.plotly_chart(fig, use_container_width= True)
+        if selected_depths:
+            melted = melted[melted["Depth"].isin(selected_depths)]            
+            # Displays the graph
+            if display == "Graph":
+                fig = px.line(
+                    melted,
+                    x = "Time",
+                    y=y_axis,                        
+                    color  ="Depth",
+                    markers = True,
+                    title = f"Soil {view} Over Time")
+                st.plotly_chart(fig, use_container_width= True)
+            else:
+                st.dataframe(melted)
         else:
-            st.dataframe(melted)
+            st.info("Select at least one depth from the dropdown above to display data.")
 
 
 
@@ -242,7 +245,7 @@ with first_tab:
 # The enviromental monitor of the deployed sensor
 with second_tab:
     default_lat, default_lon = 27.8, -97.4
-    var_select = st.multiselect("Choose Data to Display",
+    var_select = st.multiselect("Select Weather Metrics to display",
             ["Temperature", "Humidity", "Wind", "Precipitation","Soil Temp", "UV Index", "Solar Radiation"], default =[])
     
     filtering = {
@@ -330,6 +333,7 @@ with second_tab:
             st.write(f"Precipitation: **{precip_in:.1f}** inches")
             st.markdown("---")
             st.markdown("### ⚠️ Alerts")
+            alert_trigg = False
 
 
             # Temperature alerts
@@ -356,6 +360,10 @@ with second_tab:
 
             if precip_in >= 0.5:
                 st.info(f"🌧️ **Rain detected:** {precip_in:.1f} inches in last hour -    Monitor soil moisture") 
+            
+            if not alert_trigg:
+                st.success("No current weather alerts")
+    
             
 
 
@@ -393,137 +401,137 @@ with second_tab:
     left_colum, right_column = st.columns([1,1.5])
 
     # Horizontal layout
-    if layout_toggle == "Horizontal":
-        left_colum, right_column = st.columns([3,4])
+    #if layout_toggle == "Horizontal":
+    left_colum, right_column = st.columns([3,4])
+
+    
+    lat = 26.2
+    lon=27.2
+    with left_colum:
+        st.markdown("Location of the deployed sensor(s)")
+        map = folium.Map(location=[lat, lon], zoom_start=7)
+        map.add_child(folium.LatLngPopup())
+
+        map_display = st_folium(map, height = 500)
+
+
+
+
+    with right_column:
+        weather = rt_weather(lat, lon)
+        prediction_df = get_forecast(lat, lon)
+        meteo_data = open_mateo_dat(lat, lon, start_date, end_date)
+        prediction_df["Time"] = pd.to_datetime(prediction_df["Time"], errors="coerce")
+        prediction_df = prediction_df[
+                    (prediction_df["Time"].dt.date >= start) &
+                    (prediction_df["Time"].dt.date <= end)]
+                
+        if weather and not prediction_df.empty:
+            real_time = weather["timestamp"]
+            prediction_df.loc[-1] = {
+                "Time": real_time,
+                "Temperature (Celsius)" : weather["temp_c"],
+                "Humidity" : weather["humidity"],
+                "Wind" : weather["wind_speed_mph"],
+                "Precipitation" : weather["precip_in"]
+                }
+            prediction_df.sort_index(inplace=True)
+
+            if not meteo_data.empty:
+                prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
+                meteo_data["Time"] = pd.to_datetime(meteo_data["Time"])
+                prediction_df = prediction_df.sort_values("Time")
+                meteo_data = meteo_data.sort_values("Time")
+                prediction_df = pd.merge_asof(
+                    prediction_df,
+                    meteo_data,
+                    on = "Time",
+                    direction = "nearest",
+                    tolerance = pd.Timedelta("1H")
+                )
+            
+            #mateo_uv = None
+            if not meteo_data.empty and "UV Index" in meteo_data.columns:
+                current_time = pd.to_datetime(weather["timestamp"])
+                recent_uv = meteo_data[meteo_data["Time"] <= current_time]
+                if not recent_uv.empty:
+                    mateo_uv = recent_uv.iloc[-1]["UV Index"]
+
+            #recent_soil_temp = None
+            #recent_solar = None
+
+            if not meteo_data.empty and "Soil Temp (C)" in meteo_data.columns:
+                current_time = pd.to_datetime(weather["timestamp"])
+                recent_soil_df = meteo_data[meteo_data["Time"] <= current_time]
+                if not recent_soil_df.empty:
+                    recent_soil_temp = recent_soil_df.iloc[-1]["Soil Temp (C)"]
+
+            if not meteo_data.empty and "Solar Radiation (W/m^2)" in meteo_data.columns:
+                current_time = pd.to_datetime(weather["timestamp"])
+                recent_solar_df = meteo_data[meteo_data["Time"] <= current_time]
+                if not recent_solar_df.empty:
+                    recent_solar = recent_solar_df.iloc[-1]["Solar Radiation (W/m^2)"]
+
+
+            alerts(
+                temp_c = weather["temp_c"],
+                wind_speed_mph = weather["wind_speed_mph"],
+                humidity = weather["humidity"],
+                soil_temperature_0cm =recent_soil_temp,
+                solar_radiation = recent_solar,
+                uv_index = mateo_uv,
+                precip_in = weather["precip_in"]
+            )
+
+
+
+            # Temperature toggling data for soil temp and air temp
+            to_faren = switch_unit == "Fahrenheit (°F)"
+                # For graph filtering
+                            
+            filtering["Soil Temp"] = "Soil Temp (°F)" if to_faren else "Soil Temp (C)"
+
+            prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply (lambda x : convert_temp (x, switch_unit == "Fahrenheit (°F)"))
+            if "Soil Temp (C)" in prediction_df.columns:
+                prediction_df["Soil Temp Display"] = prediction_df["Soil Temp (C)"].apply(lambda x: convert_temp(x, to_faren))
+
+
+            has_uv = "UV Index" in prediction_df.columns and prediction_df["UV Index"].gt(0).any()
+            has_solar = "Solar Radiation (W/m^2)" in prediction_df.columns and prediction_df["Solar Radiation (W/m^2)"].notna().any()
+
+            avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
+            if "Soil Temp Display" in prediction_df.columns:
+                avail_column.append("Soil Temp Display")
+            if has_uv:
+                avail_column.append("UV Index")
+            if has_solar:
+                avail_column.append("Solar Radiation (W/m^2)")
+
+
+
+            prediction_df.index = prediction_df.index + 1
+            prediction_df.sort_index(inplace = True)
+            rename_dict = {
+                "Display Temp": filtering["Temperature"],
+                "Humidity": filtering["Humidity"],
+                "Wind": filtering["Wind"],
+                "Precipitation": filtering["Precipitation"]
+            }
+            if "Soil Temp Display" in prediction_df.columns:
+                rename_dict["Soil Temp Display"] = filtering["Soil Temp"]
+            if has_uv:
+                rename_dict["UV Index"] = filtering["UV Index"]
+            if has_solar:
+                rename_dict["Solar Radiation (W/m^2)"] = filtering["Solar Radiation"]
 
         
-        lat = 26.2
-        lon=27.2
-        with left_colum:
-            st.markdown("Location of the deployed sensor(s)")
-            map = folium.Map(location=[lat, lon], zoom_start=7)
-            map.add_child(folium.LatLngPopup())
-
-            map_display = st_folium(map, height = 500)
+            horiz_columns = prediction_df[avail_column].rename(columns=rename_dict)
+            horiz_filter_columun = pd.melt(horiz_columns, id_vars=["Time"], var_name="Metric", value_name="Value")
+            selected_horiz_data = [filtering[m] for m in var_select if m in filtering]
+            actual_horiz_filtered = horiz_filter_columun[horiz_filter_columun["Metric"].isin(selected_horiz_data)]
 
 
-
-
-        with right_column:
-            weather = rt_weather(lat, lon)
-            prediction_df = get_forecast(lat, lon)
-            meteo_data = open_mateo_dat(lat, lon, start_date, end_date)
-            prediction_df["Time"] = pd.to_datetime(prediction_df["Time"], errors="coerce")
-            prediction_df = prediction_df[
-                        (prediction_df["Time"].dt.date >= start) &
-                        (prediction_df["Time"].dt.date <= end)]
-                    
-            if weather and not prediction_df.empty:
-                real_time = weather["timestamp"]
-                prediction_df.loc[-1] = {
-                    "Time": real_time,
-                    "Temperature (Celsius)" : weather["temp_c"],
-                    "Humidity" : weather["humidity"],
-                    "Wind" : weather["wind_speed_mph"],
-                    "Precipitation" : weather["precip_in"]
-                    }
-                prediction_df.sort_index(inplace=True)
-
-                if not meteo_data.empty:
-                    prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
-                    meteo_data["Time"] = pd.to_datetime(meteo_data["Time"])
-                    prediction_df = prediction_df.sort_values("Time")
-                    meteo_data = meteo_data.sort_values("Time")
-                    prediction_df = pd.merge_asof(
-                        prediction_df,
-                        meteo_data,
-                        on = "Time",
-                        direction = "nearest",
-                        tolerance = pd.Timedelta("1H")
-                    )
-                
-                #mateo_uv = None
-                if not meteo_data.empty and "UV Index" in meteo_data.columns:
-                    current_time = pd.to_datetime(weather["timestamp"])
-                    recent_uv = meteo_data[meteo_data["Time"] <= current_time]
-                    if not recent_uv.empty:
-                        mateo_uv = recent_uv.iloc[-1]["UV Index"]
-
-                #recent_soil_temp = None
-                #recent_solar = None
-
-                if not meteo_data.empty and "Soil Temp (C)" in meteo_data.columns:
-                    current_time = pd.to_datetime(weather["timestamp"])
-                    recent_soil_df = meteo_data[meteo_data["Time"] <= current_time]
-                    if not recent_soil_df.empty:
-                        recent_soil_temp = recent_soil_df.iloc[-1]["Soil Temp (C)"]
-
-                if not meteo_data.empty and "Solar Radiation (W/m^2)" in meteo_data.columns:
-                    current_time = pd.to_datetime(weather["timestamp"])
-                    recent_solar_df = meteo_data[meteo_data["Time"] <= current_time]
-                    if not recent_solar_df.empty:
-                        recent_solar = recent_solar_df.iloc[-1]["Solar Radiation (W/m^2)"]
-
-
-                alerts(
-                    temp_c = weather["temp_c"],
-                    wind_speed_mph = weather["wind_speed_mph"],
-                    humidity = weather["humidity"],
-                    soil_temperature_0cm =recent_soil_temp,
-                    solar_radiation = recent_solar,
-                    uv_index = mateo_uv,
-                    precip_in = weather["precip_in"]
-                )
-
-
-
-                # Temperature toggling data for soil temp and air temp
-                to_faren = switch_unit == "Fahrenheit (°F)"
-                 # For graph filtering
-                                
-                filtering["Soil Temp"] = "Soil Temp (°F)" if to_faren else "Soil Temp (C)"
-
-                prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply (lambda x : convert_temp (x, switch_unit == "Fahrenheit (°F)"))
-                if "Soil Temp (C)" in prediction_df.columns:
-                    prediction_df["Soil Temp Display"] = prediction_df["Soil Temp (C)"].apply(lambda x: convert_temp(x, to_faren))
-
-
-                has_uv = "UV Index" in prediction_df.columns and prediction_df["UV Index"].gt(0).any()
-                has_solar = "Solar Radiation (W/m^2)" in prediction_df.columns and prediction_df["Solar Radiation (W/m^2)"].notna().any()
-
-                avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
-                if "Soil Temp Display" in prediction_df.columns:
-                    avail_column.append("Soil Temp Display")
-                if has_uv:
-                    avail_column.append("UV Index")
-                if has_solar:
-                    avail_column.append("Solar Radiation (W/m^2)")
-
-
-
-                prediction_df.index = prediction_df.index + 1
-                prediction_df.sort_index(inplace = True)
-                rename_dict = {
-                    "Display Temp": filtering["Temperature"],
-                    "Humidity": filtering["Humidity"],
-                    "Wind": filtering["Wind"],
-                    "Precipitation": filtering["Precipitation"]
-                }
-                if "Soil Temp Display" in prediction_df.columns:
-                    rename_dict["Soil Temp Display"] = filtering["Soil Temp"]
-                if has_uv:
-                    rename_dict["UV Index"] = filtering["UV Index"]
-                if has_solar:
-                    rename_dict["Solar Radiation (W/m^2)"] = filtering["Solar Radiation"]
-
-          
-                horiz_columns = prediction_df[avail_column].rename(columns=rename_dict)
-                horiz_filter_columun = pd.melt(horiz_columns, id_vars=["Time"], var_name="Metric", value_name="Value")
-                selected_horiz_data = [filtering[m] for m in var_select if m in filtering]
-                actual_horiz_filtered = horiz_filter_columun[horiz_filter_columun["Metric"].isin(selected_horiz_data)]
-
-
-
+            if var_select:
                 graph = px.line(
                     actual_horiz_filtered,
                     x = "Time",                    
@@ -534,156 +542,5 @@ with second_tab:
                     line_shape= "spline"
                     )
                 st.plotly_chart(graph, use_container_width= True)
-            
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    else:  # Vertical layout
-        m = folium.Map(location=[lat, lon], zoom_start=7)
-        m.add_child(folium.LatLngPopup())
-        map_data = st_folium(m, height=500)
-
-        if map_data and map_data.get("last_clicked"):
-            lat = map_data["last_clicked"]["lat"]
-            lon = map_data["last_clicked"]["lng"]
-            st.success(f"Selected location {lat:.3f}, {lon:.3f}")
-
-            weather = rt_weather(lat, lon)
-            prediction_df = get_forecast(lat, lon)
-            meteo_data = open_mateo_dat(lat, lon, start_date, end_date)
-
-                #Gives alerts depending on current/forecasted weather
-            mateo_uv = None
-            if not meteo_data.empty and "UV Index" in meteo_data.columns:
-                current_time = pd.to_datetime(weather["timestamp"])
-                recent_uv = meteo_data[meteo_data["Time"] <= current_time]
-                if not recent_uv.empty:
-                    mateo_uv = recent_uv.iloc[-1]["UV Index"]
-                
-            recent_soil_temp = None
-            if not meteo_data.empty and "Soil Temp (C)" in meteo_data.columns:
-                current_time = pd.to_datetime(weather["timestamp"])
-                recent_soil_df = meteo_data[meteo_data["Time"] <= current_time]
-                if not recent_soil_df.empty:
-                    recent_soil_temp = recent_soil_df.iloc[-1]["Soil Temp (C)"]
-            if not meteo_data.empty and "Solar Radiation (W/m^2)" in meteo_data.columns:
-                current_time = pd.to_datetime(weather["timestamp"])
-                recent_solar_df = meteo_data[meteo_data["Time"] <= current_time]
-                if not recent_solar_df.empty:
-                    recent_solar = recent_solar_df.iloc[-1]["Solar Radiation (W/m^2)"]
-
-            alerts(
-                temp_c=weather["temp_c"],
-                wind_speed_mph=weather["wind_speed_mph"],
-                uv_index=mateo_uv,
-                precip_in=weather["precip_in"],
-                soil_temperature_0cm=recent_soil_temp,
-                humidity=weather["humidity"],
-                solar_radiation = recent_solar
-            )
-
-            
-
-            if weather and not prediction_df.empty:
-                prediction_df.loc[-1] = {
-                    "Time": weather["timestamp"],
-                    "Temperature (Celsius)": weather["temp_c"],
-                    "Humidity": weather["humidity"],
-                    "Wind Speed": weather["wind_speed_mph"],
-                    "Precipitation" : weather["precip_in"]
-                }
-
-                if not meteo_data.empty:
-                    prediction_df["Time"]= pd.to_datetime(prediction_df["Time"])
-                    meteo_data["Time"] = pd.to_datetime(meteo_data["Time"])
-                    prediction_df = prediction_df.sort_values("Time")
-                    meteo_data = meteo_data.sort_values("Time")
-                    prediction_df = pd.merge_asof(
-                            prediction_df,
-                            meteo_data,
-                            on = "Time",
-                            direction = "nearest",
-                            tolerance = pd.Timedelta("1H")
-                    )
-                st.write("🧬 prediction_df after merge:")
-                st.dataframe(prediction_df.head(10))
-
-                st.write("📈 Soil Temp (C) non-NaN values:")
-                st.write(prediction_df["Soil Temp (C)"].dropna().head())
-
-                st.write("🔆 UV Index non-NaN values:")
-                st.write(prediction_df["UV Index"].dropna().head())
-
-                st.write("☀️ Solar Radiation non-NaN values:")
-                st.write(prediction_df["Solar Radiation (W/m^2)"].dropna().head())
-
-                    
-
-
-                # Temperature toggling data for soil temp and air temp
-                to_faren = switch_unit == "Fahrenheit (°F)"
-                filtering["Soil Temp"] = "Soil Temp (°F)" if to_faren else "Soil Temp (C)"
-                prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply (lambda x : convert_temp (x, switch_unit == "Fahrenheit (°F)"))
-                if "Soil Temp (C)" in prediction_df.columns:
-                    prediction_df["Soil Temp Display"] = prediction_df["Soil Temp (C)"].apply(lambda x: convert_temp(x, to_faren))
-                    
-                avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
-                if "Soil Temp Display" in prediction_df.columns:
-                    avail_column.append("Soil Temp Display")
-                if "UV Index" in prediction_df.columns:
-                    avail_column.append("UV Index")
-
-
-
-
-                prediction_df.index += 1
-                prediction_df.sort_index(inplace=True)
-                vert_colum = prediction_df[avail_column].rename(columns={
-                    "Display Temp": filtering["Temperature"],     #f"Temp ({'F' if switch_unit == 'Fahrenheit (°F)' else '°C'})",
-                    "Humidity": filtering["Humidity"],
-                    "Wind": filtering["Wind"],
-                    "Precipitation" : filtering["Precipitation"],
-                    "Soil Temp Display" : filtering["Soil Temp"],
-                    "UV Index" : filtering["UV Index"]
-                })
-                vert_filter_column = pd.melt(vert_colum, id_vars="Time", var_name="Metric", value_name="Value")
-                selected_vert_data = [filtering[i] for i in var_select]
-                actual_vert_filtered = vert_filter_column[vert_filter_column["Metric"].isin(selected_vert_data)]
-
-                chart = px.line(actual_vert_filtered,
-                            x="Time",
-                            y="Value", 
-                            color="Metric",
-                            markers=True,
-                            line_shape="spline",
-                            title=f"Real-time + Forecast at ({lat:.2f}, {lon:.2f})")
-                
-
-                st.plotly_chart(chart, use_container_width=True)
+            else:
+                 st.info("Select data from the dropdown above to display the graph.")
