@@ -142,32 +142,39 @@ with first_tab:
         st.subheader("Soil Moisture and Temperature")
         col1, col2, =st.columns(2)
         with col1:
-                view = st.radio("Select view:", ["Moisture", "Temperature"])
-        with col2:
                 display = st.radio('Display as:', ["Graph", "Table"])
+        with col2:
+                view = st.radio("Display on Graph:", ["Moisture", "Temperature"])
 
 
-        #Turns the multiple depth columns into one
-        if view == "Moisture":
-            melted = fnl_table.melt(
-                id_vars="Time",
-                value_vars=[col for col in fnl_table.columns if "Moisture" in col],
-                var_name="Sensor Reading",
-                value_name="Moisture (%)"
-            )
-            melted["Depth"] = melted["Sensor Reading"].str.extract(r"(\d+cm)")
-            y_axis = "Moisture (%)"
-        else:
-            value_name = f"Temperature ({temp_unit})"
-            melted = fnl_table.melt(
-                id_vars="Time",
-                value_vars=[col for col in fnl_table.columns if "Temp" in col],
-                var_name="Sensor Reading",
-                value_name=value_name
-            )
-            melted["Depth"] = melted["Sensor Reading"].str.extract(r"(\d+cm)")
-            y_axis = value_name
-      
+
+        # Melt moisture
+        moist_melt = fnl_table.melt(
+            id_vars="Time",
+            value_vars=[col for col in fnl_table.columns if "Moisture" in col],
+            var_name="Sensor",
+            value_name="Moisture (%)"
+        )
+        moist_melt["Depth"] = moist_melt["Sensor"].str.extract(r"(\d+cm)")
+
+        # Melt temperature
+        temp_melt = fnl_table.melt(
+            id_vars="Time",
+            value_vars=[col for col in fnl_table.columns if "Temp" in col],
+            var_name="Sensor",
+            value_name=f"Temperature ({temp_unit})"
+        )
+        temp_melt["Depth"] = temp_melt["Sensor"].str.extract(r"(\d+cm)")
+
+        # Merge on Time and Depth
+        melted = pd.merge(
+            moist_melt[["Time", "Depth", "Moisture (%)"]],
+            temp_melt[["Time", "Depth", f"Temperature ({temp_unit})"]],
+            on=["Time", "Depth"],
+            how="inner"
+        )
+
+            
 
         # Allow user to select depths to view
         available_depths = ["10cm", "20cm", "30cm", "40cm"]
@@ -197,8 +204,7 @@ with first_tab:
                     else:
                         st.info(f"Borderline moisture at {depth}: {moisture_val:.1f}% - Monitor closely")
 
-
-        # Displays the corresponding data depending on whether the user selected moisture or temperature
+         # Displays the corresponding data depending on whether the user selected moisture or temperature
         if view == "Moisture":
             active_df = moist_df
         else:
@@ -236,22 +242,55 @@ with first_tab:
                     title = f"Soil {view} Over Time")
                 st.plotly_chart(fig, use_container_width= True)
             else:
-                melted["Time"] = melted["Time"].dt.strftime("%b %d, %Y %H:%M")
-                st.dataframe(melted)
+                 melted["Time"] = melted["Time"].dt.strftime("%b %d, %Y %H:%M")
+                 st.dataframe(melted, use_container_width=True, hide_index=True)
+
+
+
 
         else:
             st.info("Select at least one depth from the dropdown above to display data.")
 
-        # Allows user to download csv file of all the soil moisture data collected by sensors
+        # Allows user to download csv file of all the soil moisture data collected by sensors        
         import io
-        csv_buffer = io.StringIO()
-        fnl_table.to_csv(csv_buffer, index = False)
-        st.download_button(
-            label = "📥 Download Full Soil Sensor Data (CSV)",
-            data = csv_buffer.getvalue(),
-            file_name = "soil_sensor_data.csv",
-            mime = "text/csv"
-        )
+
+        with st.expander("📥 Download CSV by Depth"):
+            col1, col2, col3 = st.columns(3)
+            depths = ["All", "10cm", "20cm", "30cm", "40cm"]
+
+            for i, depth in enumerate(depths):
+                with [col1, col2, col3][i % 3]:
+                    if st.button(depth):
+                        # Select columns to include
+                        if depth == "All":
+                            depth_cols = []
+                            for d in ["10cm", "20cm", "30cm", "40cm"]:
+                                moist_col = f"{d} Moisture (%)"
+                                temp_col = f"{d} Temp ({temp_unit})"
+                                if moist_col in fnl_table:
+                                    depth_cols.append(moist_col)
+                                if temp_col in fnl_table:
+                                    depth_cols.append(temp_col)
+                        else:
+                            moist_col = f"{depth} Moisture (%)"
+                            temp_col = f"{depth} Temp ({temp_unit})"
+                            depth_cols = []
+                            if moist_col in fnl_table:
+                                depth_cols.append(moist_col)
+                            if temp_col in fnl_table:
+                                depth_cols.append(temp_col)
+
+                        # Create and download CSV
+                        depth_filtered_df = fnl_table[["Time"] + depth_cols]
+                        csv_buffer = io.StringIO()
+                        depth_filtered_df.to_csv(csv_buffer, index=False)
+                        st.download_button(
+                            label=f"⬇ Download {depth} CSV",
+                            data=csv_buffer.getvalue(),
+                            file_name=f"soil_data_{depth.lower()}.csv",
+                            mime="text/csv",
+                            key=f"dl_{depth}"
+                        )
 
        
 
@@ -259,6 +298,9 @@ with first_tab:
 
 # The enviromental monitor of the deployed sensor
 with second_tab:
+
+    sensor_loc = [{"name": "Sensor A", "lat": 27.7742, "lon": -97.5128}]
+
 
     # To change once we have actually deployed it in the field
     default_lat, default_lon = 27.7742, -97.5128
@@ -441,6 +483,15 @@ with second_tab:
         return pd.DataFrame(gdd_data)
 
 
+    # 🌦️ Always show current field alerts in sidebar
+    default_weather = rt_weather(default_lat, default_lon)
+    if default_weather:
+        alerts(
+            temp_c=default_weather["temp_c"],
+            wind_speed_mph=default_weather["wind_speed_mph"],
+            humidity=default_weather["humidity"],
+            precip_in=default_weather["precip_in"]
+    )
 
 
     # TBD Horizontal layout
@@ -448,122 +499,118 @@ with second_tab:
 
 
     # Makes the map and graph equal size
-    left_colum, right_column = st.columns([3,4])
+    left_column, right_column = st.columns([3,4])
 
 
 
     # Displays location of current sensor(s) in a map
-    with left_colum:
-        st.markdown("Location of the deployed sensor(s)")
-        lat = 27.7742
-        lon=-97.5128
-        map = folium.Map(location=[lat, lon], zoom_start=7)
-        map.add_child(folium.LatLngPopup())
-        map_display = st_folium(map, height = 500)
+    with left_column:
+    # Adds a heading and a bit of vertical spacing to push the map lower
+        st.markdown("### 📍 Sensor Map")
+        st.markdown("&nbsp;" * 10, unsafe_allow_html=True)  # Adds a small spacer
+
+        # Always show the marker even if it's not clicked
+        map = folium.Map(location=[27.7742, -97.5128], zoom_start=14)
+        for sensor in sensor_loc:
+            folium.Marker(
+                location=[sensor["lat"], sensor["lon"]],
+                popup=sensor["name"],
+                tooltip="Click to view data",
+                icon=folium.Icon(color="green", icon="info-sign")
+            ).add_to(map)
+
+        # Render the map and allow clicks
+        map_data = st_folium(map, height=500, returned_objects=["last_object_clicked"])
 
 
 
-    # Displays GDD accumulation graph
-    with right_column:
 
-        # Grabs all the data using our inputted lat/lon coordinates
-        weather = rt_weather(lat, lon)
-        prediction_df = get_forecast(lat, lon)
-        meteo_data = open_mateo_dat(lat, lon, start_str, end_str)
-
-                
-        # Connects the current data metrics to its current value
-        if weather and not prediction_df.empty:
-            real_time = weather["timestamp"]
-            prediction_df.loc[-1] = {
-                "Time": real_time,
-                "Temperature (Celsius)" : weather["temp_c"],
-                "Humidity" : weather["humidity"],
-                "Wind" : weather["wind_speed_mph"],
-                "Precipitation" : weather["precip_in"]
-                }
-            prediction_df.sort_index(inplace=True)
-
-            # Connects the forecasted data based on the time
-            if not meteo_data.empty:
-                prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
-                meteo_data["Time"] = pd.to_datetime(meteo_data["Time"])
-                prediction_df = prediction_df.sort_values("Time")
-                meteo_data = meteo_data.sort_values("Time")
-                prediction_df = pd.merge_asof(
-                    prediction_df,
-                    meteo_data,
-                    on = "Time",
-                    direction = "nearest",
-                    tolerance = pd.Timedelta("1H")
-                )
-
-            # Allows the weather prediction to work
-            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
-            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
-            prediction_df["Time"] = pd.to_datetime(prediction_df["Time"], errors="coerce")
-            prediction_df = prediction_df[
-                        (prediction_df["Time"].dt.date >= start_date) &
-                        (prediction_df["Time"].dt.date <= end_date)]
-                    
-
-            # Calls the alert function in order for it to work
-            alerts(
-                temp_c = weather["temp_c"],
-                wind_speed_mph = weather["wind_speed_mph"],
-                humidity = weather["humidity"],
-                precip_in = weather["precip_in"]
-            )
-
-
-            # Allows for the switching of units
-            to_faren = switch_unit == "Fahrenheit (°F)"
-            prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply (lambda x : convert_temp (x, switch_unit == "Fahrenheit (°F)"))
    
 
 
-            # Reorganizes the table/graph for clean labels
-            avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
-            prediction_df.index = prediction_df.index + 1
-            prediction_df.sort_index(inplace = True)
-            rename_dict = {
-                "Display Temp": filtering["Air Temperature"],
-                "Humidity": filtering["Humidity"],
-                "Wind": filtering["Wind Speed"],
-                "Precipitation": filtering["Precipitation"]
-            }
 
 
-        
-            # Collects the past GDD data and graphs it
-            if not prediction_df.empty:
-                gdd_df = calc_gdd(prediction_df)
-                if planting_date < date.today():
-                    hist_df = historical_data(lat, lon, planting_date.strftime("%Y-%m-%d"), date.today().strftime("%Y-%m-%d"))
-                    hist_df = hist_df[["Date", "GDD"]]
-                    hist_df["Date"] = pd.to_datetime(hist_df["Date"]).dt.date
-                    gdd_df = pd.concat([hist_df, gdd_df], ignore_index=True)
-                    gdd_df = gdd_df[gdd_df["Date"] >= planting_date]
 
+    with right_column:
+        view_mode = st.radio("Select View:", ["Heat Unit (GDD)", "Real-time Weather & Forecast"], index=0)
 
-                if not gdd_df.empty:
-                    st.subheader("Heat Unit (GDD) Accumulation")
-                    st.write(f"Total GDD since {planting_date}: **{gdd_df['GDD'].sum():.1f}**")
-                    fig = px.bar(gdd_df, x="Date", y="GDD", title="", labels={"GDD": "Heat Units"})
-                    st.plotly_chart(fig, use_container_width=True)
+        if view_mode == "Heat Unit (GDD)":
+            st.subheader("Heat Unit (GDD) Accumulation")
 
-            horiz_columns = prediction_df[avail_column].rename(columns=rename_dict)
-            horiz_filter_columun = pd.melt(horiz_columns, id_vars=["Time"], var_name="Metric", value_name="Value")
-            selected_horiz_data = [filtering[m] for m in selected_data if m in filtering]
-            actual_horiz_filtered = horiz_filter_columun[horiz_filter_columun["Metric"].isin(selected_horiz_data)]
+            if planting_date < date.today():
+                hist_df = historical_data(default_lat, default_lon, planting_date.strftime("%Y-%m-%d"), date.today().strftime("%Y-%m-%d"))
+                hist_df = hist_df[["Date", "GDD"]]
+                hist_df["Date"] = pd.to_datetime(hist_df["Date"]).dt.date
+            else:
+                hist_df = pd.DataFrame()
 
-            graph = px.line(
-                actual_horiz_filtered,
-                x = "Time",
-                y = "Value",
-                color = "Metric",
-                title  = f"Real time and predicted data at ({lat:.2f}, {lon:.2f})",
-                markers = True,
-                line_shape= "spline"
-            )
-            st.plotly_chart(graph, use_container_width=True)
+            forecast_df = get_forecast(default_lat, default_lon)
+            if not forecast_df.empty:
+                gdd_df = calc_gdd(forecast_df)
+                gdd_df = pd.concat([hist_df, gdd_df], ignore_index=True)
+                gdd_df = gdd_df[gdd_df["Date"] >= planting_date]
+                st.write(f"Total GDD since {planting_date}: **{gdd_df['GDD'].sum():.1f}**")
+                fig = px.bar(gdd_df, x="Date", y="GDD", labels={"GDD": "Heat Units"})
+                st.plotly_chart(fig, use_container_width=True)
+
+        elif view_mode == "Real-time Weather & Forecast":
+            lat = default_lat
+            lon = default_lon
+
+            weather = rt_weather(lat, lon)
+            prediction_df = get_forecast(lat, lon)
+            meteo_data = open_mateo_dat(lat, lon, start_str, end_str)
+
+            if weather and not prediction_df.empty:
+                real_time = weather["timestamp"]
+                prediction_df.loc[-1] = {
+                    "Time": real_time,
+                    "Temperature (Celsius)": weather["temp_c"],
+                    "Humidity": weather["humidity"],
+                    "Wind": weather["wind_speed_mph"],
+                    "Precipitation": weather["precip_in"]
+                }
+                prediction_df.index = prediction_df.index + 1
+                prediction_df.sort_index(inplace=True)
+
+                if not meteo_data.empty:
+                    prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
+                    meteo_data["Time"] = pd.to_datetime(meteo_data["Time"])
+                    prediction_df = pd.merge_asof(
+                        prediction_df.sort_values("Time"),
+                        meteo_data.sort_values("Time"),
+                        on="Time",
+                        direction="nearest",
+                        tolerance=pd.Timedelta("1H")
+                    )
+
+                prediction_df["Time"] = pd.to_datetime(prediction_df["Time"], errors="coerce")
+                prediction_df = prediction_df[
+                    (prediction_df["Time"].dt.date >= datetime.strptime(start_str, "%Y-%m-%d").date()) &
+                    (prediction_df["Time"].dt.date <= datetime.strptime(end_str, "%Y-%m-%d").date())
+                ]
+
+                to_fahrenheit = switch_unit == "Fahrenheit (°F)"
+                prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply(lambda x: convert_temp(x, to_fahrenheit))
+
+                filtering = {
+                    "Air Temperature": f"Temp ({'F' if to_fahrenheit else '°C'})",
+                    "Humidity": "Humidity (%)",
+                    "Wind Speed": "Wind Speed (mph)",
+                    "Precipitation": "Precipitation (in)"
+                }
+
+                avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
+                rename_dict = {
+                    "Display Temp": filtering["Air Temperature"],
+                    "Humidity": filtering["Humidity"],
+                    "Wind": filtering["Wind Speed"],
+                    "Precipitation": filtering["Precipitation"]
+                }
+
+                df_renamed = prediction_df[avail_column].rename(columns=rename_dict)
+                df_melt = pd.melt(df_renamed, id_vars=["Time"], var_name="Metric", value_name="Value")
+
+                st.subheader("Real-time and Forecast Data")
+                fig = px.line(df_melt, x="Time", y="Value", color="Metric", markers=True, line_shape="spline")
+                st.plotly_chart(fig, use_container_width=True)
