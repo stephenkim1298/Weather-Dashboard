@@ -299,7 +299,7 @@ with first_tab:
 # The enviromental monitor of the deployed sensor
 with second_tab:
 
-    sensor_loc = [{"name": "Sensor A", "lat": 27.7742, "lon": -97.5128}]
+    sensor_loc = [{"name": "Sensor 1", "lat": 27.7706, "lon": -97.5012}]
 
 
     # To change once we have actually deployed it in the field
@@ -308,7 +308,7 @@ with second_tab:
     # Shows the data selected and allows user to choose what to displays
     selected_data = ["Air Temperature", "Humidity", "Wind Speed", "Precipitation"]
     filtering = {
-                "Air Temperature": f"Temp ({'F' if switch_unit == 'Fahrenheit (°F)' else '°C'})",
+                "Air Temperature": f"Temp ({'°F' if switch_unit == 'Fahrenheit (°F)' else '°C'})",
                 "Humidity": "Humidity (%)",
                 "Wind Speed": "Wind Speed (mph)",
                 "Precipitation": "Precipitation (in)",
@@ -506,15 +506,22 @@ with second_tab:
     # Displays location of current sensor(s) in a map
     with left_column:
     # Adds a heading and a bit of vertical spacing to push the map lower
-        st.markdown("### 📍 Sensor Map")
+        st.markdown("### 📍 Sensor(s) Map")
         st.markdown("&nbsp;" * 10, unsafe_allow_html=True)  # Adds a small spacer
 
         # Always show the marker even if it's not clicked
-        map = folium.Map(location=[27.7742, -97.5128], zoom_start=14)
+        sensor_1 = sensor_loc[0]
+        map = folium.Map(location=[sensor_1["lat"], sensor_1["lon"]], zoom_start=15)
         for sensor in sensor_loc:
+            popup_content = f"""
+            <b>{sensor['name']}</b><br>
+            Lat: {sensor['lat']:.4f}<br>
+            Lon: {sensor['lon']:.4f}
+            """  # You can add more fields if needed
+
             folium.Marker(
                 location=[sensor["lat"], sensor["lon"]],
-                popup=sensor["name"],
+                popup=popup_content,
                 tooltip="Click to view data",
                 icon=folium.Icon(color="green", icon="info-sign")
             ).add_to(map)
@@ -594,7 +601,7 @@ with second_tab:
                 prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply(lambda x: convert_temp(x, to_fahrenheit))
 
                 filtering = {
-                    "Air Temperature": f"Temp ({'F' if to_fahrenheit else '°C'})",
+                    "Air Temperature": f"Temp ({'°F' if to_fahrenheit else '°C'})",
                     "Humidity": "Humidity (%)",
                     "Wind Speed": "Wind Speed (mph)",
                     "Precipitation": "Precipitation (in)"
@@ -611,6 +618,6 @@ with second_tab:
                 df_renamed = prediction_df[avail_column].rename(columns=rename_dict)
                 df_melt = pd.melt(df_renamed, id_vars=["Time"], var_name="Metric", value_name="Value")
 
-                st.subheader("Real-time and Forecast Data")
+                st.subheader("Sensor 1 Conditions")
                 fig = px.line(df_melt, x="Time", y="Value", color="Metric", markers=True, line_shape="spline")
                 st.plotly_chart(fig, use_container_width=True)
