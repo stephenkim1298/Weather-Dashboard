@@ -9,32 +9,49 @@ import folium
 
 
 
-# API key for the open weather data
+# API key for accessing OpenWeather
 Api_key = "b512ece5d83613e319c1c55a2055f5be"
+
+# To change once we have actually deployed it in the field
 default_lat, default_lon = 27.8, -97.4
 
-#Universal toggles for both tabs
+#Universal temp unit toggle for both tabs
 switch_unit = st.sidebar.radio("Temperature Unit", ["Fahrenheit (°F)", "Celsius (°C)"])
+
+#Still debating whether to integrate this layout: layout_toggle = st.sidebar.radio("Layout Mode", ["Horizontal", "Vertical"])
+
+
+# Allows user to choose a date range in which the soil moisture is displayed in the graph
 today = date.today()
 default_start = today - timedelta(days=0)
 default_end = today + timedelta(days=3)
-#layout_toggle = st.sidebar.radio("Layout Mode", ["Horizontal", "Vertical"])
-
-start_date, end_date = st.sidebar.date_input(
-    "📅 Date Range:",
-    [default_start, default_end],
-    min_value=today - timedelta(days=30),
-    max_value=today + timedelta(days=30)
+sensor_graph_start, sensor_graph_end = st.sidebar.date_input(
+"📅 Date Range for Soil Sensor Data:",
+[default_start, default_end],
+min_value=today - timedelta(days=30),
+max_value=today + timedelta(days=30),
+key = "graph_range"
 )
+
+
+# Allows user to input the date of which the cotton was planted
+planting_date = st.sidebar.date_input(
+"🌱 Enter Planting Date:",
+min_value = date(2024, 1, 1),
+max_value = date.today(),
+key = "plant_picker")
 
 
 
 #Creates the tabs
-first_tab, second_tab = st.tabs(["Soil Moisture Sensor", "Nearby Weather and Forecast"])
+first_tab, second_tab = st.tabs(["💧 Soil Moisture Data", "🌤️ Weather & GDD Tracker"])
 
 
+
+# All the code for the "Soil Moisture Data" tab
 with first_tab:
-    # Google sheet connection
+
+    # Google sheet connection for data extraction
     spread_sheet_id  ="1VUOP7tjQrJBf7oOxeQkOrZoTav6AHeA6E1mkv-ZWJGM"
     spread_sheet_range = "Data!A1:Z"
     sheet_api = "AIzaSyAgJbMa5-_pG9ZP5mIahPNddcOOxqSP1IA"
@@ -95,7 +112,7 @@ with first_tab:
             return celsius * 1.8 + 32 if to_fahrenheit else celsius
         to_fahrenheit = switch_unit == "Fahrenheit (°F)"
 
-        # Gets average reading of the values (left to right)
+        # Gets average reading of the soil moisture values
         def avg(df, a, b):
             return (df[a] + df[b]) / 2
         
@@ -123,7 +140,6 @@ with first_tab:
 
         #Allows user to choose what to display
         st.subheader("Soil Moisture and Temperature")
-
         col1, col2, =st.columns(2)
         with col1:
                 view = st.radio("Select view:", ["Moisture", "Temperature"])
@@ -159,11 +175,13 @@ with first_tab:
             st.session_state.selected_depths = []
         selected_depths = st.multiselect("Select depths to display",
             available_depths,
-            default=st.session_state.selected_depths,
+            default=available_depths,
             key ="depth_picker")
         st.session_state.selected_depths = selected_depths
         melted = melted[melted["Depth"].isin(selected_depths)]
 
+
+        # Creates an alert system that depends on the soil moisture level
         with st.sidebar.expander("⚠️ Soil Moisture Alerts", expanded=False):
             recent_row = fnl_table.sort_values("Time").dropna().iloc[-1]
             for depth in available_depths:
@@ -189,7 +207,6 @@ with first_tab:
         # Gets the most earliest and latest dates from the time column of the dataset and filters
         min_date = active_df["Time"].min().date()
         max_date = active_df["Time"].max().date()
-        start, end = start_date, end_date
 
 
         # Sets the y-axis label for the graph
@@ -200,11 +217,15 @@ with first_tab:
 
 
         # Filter data by selected date range
-        melted = melted[(melted["Time"].dt.date >= start_date) & (melted["Time"].dt.date <= end_date)]
+        melted = melted[(melted["Time"].dt.date >= sensor_graph_start) & (melted["Time"].dt.date <= sensor_graph_end)]
 
+        # Drop the "Sensor Reading" column to simplify the table
+        if "Sensor Reading" in melted.columns:
+            melted = melted.drop(columns=["Sensor Reading"])
+
+        # Displays the graph depending on the depth selected
         if selected_depths:
             melted = melted[melted["Depth"].isin(selected_depths)]            
-            # Displays the graph
             if display == "Graph":
                 fig = px.line(
                     melted,
@@ -215,70 +236,61 @@ with first_tab:
                     title = f"Soil {view} Over Time")
                 st.plotly_chart(fig, use_container_width= True)
             else:
+                melted["Time"] = melted["Time"].dt.strftime("%b %d, %Y %H:%M")
                 st.dataframe(melted)
+
         else:
             st.info("Select at least one depth from the dropdown above to display data.")
 
+        # Allows user to download csv file of all the soil moisture data collected by sensors
+        import io
+        csv_buffer = io.StringIO()
+        fnl_table.to_csv(csv_buffer, index = False)
+        st.download_button(
+            label = "📥 Download Full Soil Sensor Data (CSV)",
+            data = csv_buffer.getvalue(),
+            file_name = "soil_sensor_data.csv",
+            mime = "text/csv"
+        )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+       
 
 
 
 # The enviromental monitor of the deployed sensor
 with second_tab:
-    default_lat, default_lon = 27.8, -97.4
-    var_select = st.multiselect("Select Weather Metrics to display",
-            ["Temperature", "Humidity", "Wind", "Precipitation","Soil Temp", "UV Index", "Solar Radiation"], default =[])
-    
+
+    # To change once we have actually deployed it in the field
+    default_lat, default_lon = 27.7742, -97.5128
+
+    # Shows the data selected and allows user to choose what to displays
+    selected_data = ["Air Temperature", "Humidity", "Wind Speed", "Precipitation"]
     filtering = {
-                "Temperature": f"Temp ({'F' if switch_unit == 'Fahrenheit (°F)' else '°C'})",
+                "Air Temperature": f"Temp ({'F' if switch_unit == 'Fahrenheit (°F)' else '°C'})",
                 "Humidity": "Humidity (%)",
-                "Wind": "Wind Speed (mph)",
+                "Wind Speed": "Wind Speed (mph)",
                 "Precipitation": "Precipitation (in)",
-                "Soil Temp": f"Soil Temp ({'°F' if switch_unit == 'Fahrenheit (°F)' else '°C'})",
-                "UV Index": "UV Index",
-                "Solar Radiation": "Solar Radiation (W/m^2)"
     }
+
+
     # Converts the celsius into farenheit
     def convert_temp(celsius, to_fahrenheit=True):
         return celsius * 9/5 + 32 if to_fahrenheit else celsius
 
-    
 
 
     # Sets time parameters for mateo api
-    current = date.today()
-    later_time = current + timedelta(days=5)
-    start_date = current.strftime("%Y-%m-%d")
-    end_date = later_time.strftime("%Y-%m-%d")
+    start_str = today.strftime("%Y-%m-%d")
+    end_str = (today + timedelta(days = 5)).strftime("%Y-%m-%d")
 
     # For accessing open mateo api
-    def open_mateo_dat(lat, lon, start_date, end_date):
+    def open_mateo_dat(lat, lon, start_str, end_str):
         mateo_url = "https://api.open-meteo.com/v1/forecast"
         factors = {
             "latitude": lat,
             "longitude": lon,
-            "hourly" : "soil_temperature_0cm,uv_index,shortwave_radiation",
-            "start_date" : start_date,
-            "end_date" : end_date,
+            "start_date" : start_str,
+            "end_date" : end_str,
             "timezone" : "auto"
         }
         r_mateo = requests.get(mateo_url, params = factors)
@@ -289,13 +301,13 @@ with second_tab:
                 mateo_df["time"] = pd.to_datetime(mateo_df["time"])
                 return mateo_df.rename(columns={
                     "time" : "Time",
-                    "soil_temperature_0cm" : "Soil Temp (C)",
-                    "uv_index" : "UV Index",
-                    "shortwave_radiation" : "Solar Radiation (W/m^2)"
             })
         return pd.DataFrame()
 
-    # Gives the current weathers data
+
+
+
+  # Gives the current weathers data
     def rt_weather(lat, lon):
         current_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={Api_key}&units=metric"
         r = requests.get(current_url)
@@ -305,7 +317,6 @@ with second_tab:
             snow = d.get("snow", {}).get("1h", 0)
             precip_mm = rain + snow
             precip_in = round(precip_mm / 25.4, 2)
-
             return {
                 "temp_c": d["main"]["temp"],
                 "humidity": d["main"]["humidity"],
@@ -316,27 +327,20 @@ with second_tab:
         return None
 
 
-    #Gives alerts depending on current/forecasted weather
-    def alerts (temp_c, wind_speed_mph, humidity, soil_temperature_0cm, uv_index = None, precip_in = 0, solar_radiation = None):
+    #Gives alerts depending on the current weather
+    def alerts (temp_c, wind_speed_mph, humidity, precip_in = 0):
         to_fahrenheit = switch_unit == "Fahrenheit (°F)"
         temp_display = temp_c * 9/5 + 32 if to_fahrenheit else temp_c
         temp_unit = "°F" if to_fahrenheit else "°C"
-        with st.sidebar.expander("🌦️ Nearby Weather Conditions and Alerts", expanded = False):
+        with st.sidebar.expander("🌦️ Current Field Weather and Alerts", expanded = False):
             st.write(f"Temperature: **{temp_display:.1f}{temp_unit}**")
             st.write(f"Wind Speed: **{wind_speed_mph:.1f}** mph")
-            st.write(f"Soil Temperature: **{soil_temperature_0cm}{temp_unit}**")
             st.write(f"Humidity: **{humidity}**%")
-            if solar_radiation is not None:
-                st.write(f"Solar Radiation: **{solar_radiation:.1f}** W/m^2")
-            if uv_index is not None:
-                st.write(f"UV Index: **{uv_index:.1f}**")
             st.write(f"Precipitation: **{precip_in:.1f}** inches")
             st.markdown("---")
             st.markdown("### ⚠️ Alerts")
             alert_trigg = False
 
-
-            # Temperature alerts
             if to_fahrenheit:
                 if temp_display > 85:
                     st.error(f"🌡️ **High Temp Alert:** {temp_display:.1f}{temp_unit} - Crop stress likely.")
@@ -344,17 +348,6 @@ with second_tab:
                 if temp_display > 29:
                     st.error(f"🌡️**High Temp Alert:** {temp_display:.1f}{temp_unit} - Crop stress likely.")
             
-            # UV alerts
-            if uv_index is not None:
-                if uv_index >= 8:
-                    st.error(f"☀️ **Extreme UV Index:** {uv_index:.1f} - Shade vulnerable crops.")
-                elif uv_index >= 6:
-                    st.error(f"🕶️ **High UV today**: {uv_index:.1f} - Sun protection advised.")
-            # Solar Radiation alert
-            if solar_radiation is not None:
-                if solar_radiation >=2600:
-                    st.error(f"**High Solar Radiation:** {solar_radiation:.1f} W/m^2 - Risk of evapotranspiration stress.")
-            # Wind alert
             if wind_speed_mph > 25:
                 st.error(f"💨 **Strong winds warning**: {wind_speed_mph:.1f} mph - May affect young or shallow crops")
 
@@ -394,38 +387,92 @@ with second_tab:
                 "Precipitation" : rain_add,
                 })
         return pd.DataFrame()
+    
+
+    # Gets the historical min/max data from open meteo for the calculation of GDD
+    def historical_data(lat, lon, start_str, end_str, base_temp = 60, max_temp = 95):
+        old_data_url = "https://archive-api.open-meteo.com/v1/archive"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start_str,
+            "end_date": end_str,
+            "daily": "temperature_2m_max,temperature_2m_min",
+            "timezone": "auto"
+        }
+        response = requests.get(old_data_url, params = params)
+        old_data = response.json()
+        old_df = pd.DataFrame({
+            "Date": old_data["daily"]["time"],
+            "Tmax_c": old_data["daily"]["temperature_2m_max"],
+            "Tmin_c": old_data["daily"]["temperature_2m_min"]
+        })
+
+        old_df["Tmax_F"] = old_df["Tmax_c"] * 1.8 + 32
+        old_df["Tmin_F"] = old_df["Tmin_c"] * 1.8 + 32
+        old_df["Tmax_F"] = old_df["Tmax_F"].apply(lambda x: min(x, max_temp))
+        old_df["Tmin_F"] = old_df["Tmin_F"].apply(lambda x: max(x, base_temp))
+        old_df["GDD"] = ((old_df["Tmax_F"]+old_df["Tmin_F"])/2) - base_temp
+        old_df["GDD"] = old_df["GDD"].apply(lambda x: max(0, round(x, 1)))
+
+        return old_df
 
 
 
-    # Makes map and chart evenly spaced
-    left_colum, right_column = st.columns([1,1.5])
 
-    # Horizontal layout
+    # Calculates the heat units
+    base_temp_f = 60
+    def calc_gdd(forecast_df, base_temp = 60, max_temp = 95):
+        forecast_df["Time"] = pd.to_datetime(forecast_df["Time"], errors="coerce")
+        forecast_df = forecast_df.dropna(subset=["Time"])
+        forecast_df["Date"] = forecast_df["Time"].dt.date
+
+        gdd_data = []
+        
+        for day in forecast_df["Date"].unique():
+            daily_data = forecast_df[forecast_df["Date"] == day]
+            if not daily_data.empty:
+                t_max_f = daily_data["Temperature (Celsius)"].max() * 9/5 + 32
+                t_min_f = daily_data["Temperature (Celsius)"].min() * 9/5 + 32
+                t_max_f = min(t_max_f, max_temp)
+                t_min_f = max(t_min_f, base_temp)
+                gdd = max(0, ((t_max_f + t_min_f) / 2) - base_temp)
+                gdd_data.append({"Date": day, "GDD": max(0, round(gdd, 1))})
+        return pd.DataFrame(gdd_data)
+
+
+
+
+    # TBD Horizontal layout
     #if layout_toggle == "Horizontal":
+
+
+    # Makes the map and graph equal size
     left_colum, right_column = st.columns([3,4])
 
-    
-    lat = 26.2
-    lon=27.2
+
+
+    # Displays location of current sensor(s) in a map
     with left_colum:
         st.markdown("Location of the deployed sensor(s)")
+        lat = 27.7742
+        lon=-97.5128
         map = folium.Map(location=[lat, lon], zoom_start=7)
         map.add_child(folium.LatLngPopup())
-
         map_display = st_folium(map, height = 500)
 
 
 
-
+    # Displays GDD accumulation graph
     with right_column:
+
+        # Grabs all the data using our inputted lat/lon coordinates
         weather = rt_weather(lat, lon)
         prediction_df = get_forecast(lat, lon)
-        meteo_data = open_mateo_dat(lat, lon, start_date, end_date)
-        prediction_df["Time"] = pd.to_datetime(prediction_df["Time"], errors="coerce")
-        prediction_df = prediction_df[
-                    (prediction_df["Time"].dt.date >= start) &
-                    (prediction_df["Time"].dt.date <= end)]
+        meteo_data = open_mateo_dat(lat, lon, start_str, end_str)
+
                 
+        # Connects the current data metrics to its current value
         if weather and not prediction_df.empty:
             real_time = weather["timestamp"]
             prediction_df.loc[-1] = {
@@ -437,6 +484,7 @@ with second_tab:
                 }
             prediction_df.sort_index(inplace=True)
 
+            # Connects the forecasted data based on the time
             if not meteo_data.empty:
                 prediction_df["Time"] = pd.to_datetime(prediction_df["Time"])
                 meteo_data["Time"] = pd.to_datetime(meteo_data["Time"])
@@ -449,98 +497,73 @@ with second_tab:
                     direction = "nearest",
                     tolerance = pd.Timedelta("1H")
                 )
-            
-            #mateo_uv = None
-            if not meteo_data.empty and "UV Index" in meteo_data.columns:
-                current_time = pd.to_datetime(weather["timestamp"])
-                recent_uv = meteo_data[meteo_data["Time"] <= current_time]
-                if not recent_uv.empty:
-                    mateo_uv = recent_uv.iloc[-1]["UV Index"]
 
-            #recent_soil_temp = None
-            #recent_solar = None
+            # Allows the weather prediction to work
+            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
+            prediction_df["Time"] = pd.to_datetime(prediction_df["Time"], errors="coerce")
+            prediction_df = prediction_df[
+                        (prediction_df["Time"].dt.date >= start_date) &
+                        (prediction_df["Time"].dt.date <= end_date)]
+                    
 
-            if not meteo_data.empty and "Soil Temp (C)" in meteo_data.columns:
-                current_time = pd.to_datetime(weather["timestamp"])
-                recent_soil_df = meteo_data[meteo_data["Time"] <= current_time]
-                if not recent_soil_df.empty:
-                    recent_soil_temp = recent_soil_df.iloc[-1]["Soil Temp (C)"]
-
-            if not meteo_data.empty and "Solar Radiation (W/m^2)" in meteo_data.columns:
-                current_time = pd.to_datetime(weather["timestamp"])
-                recent_solar_df = meteo_data[meteo_data["Time"] <= current_time]
-                if not recent_solar_df.empty:
-                    recent_solar = recent_solar_df.iloc[-1]["Solar Radiation (W/m^2)"]
-
-
+            # Calls the alert function in order for it to work
             alerts(
                 temp_c = weather["temp_c"],
                 wind_speed_mph = weather["wind_speed_mph"],
                 humidity = weather["humidity"],
-                soil_temperature_0cm =recent_soil_temp,
-                solar_radiation = recent_solar,
-                uv_index = mateo_uv,
                 precip_in = weather["precip_in"]
             )
 
 
-
-            # Temperature toggling data for soil temp and air temp
+            # Allows for the switching of units
             to_faren = switch_unit == "Fahrenheit (°F)"
-                # For graph filtering
-                            
-            filtering["Soil Temp"] = "Soil Temp (°F)" if to_faren else "Soil Temp (C)"
-
             prediction_df["Display Temp"] = prediction_df["Temperature (Celsius)"].apply (lambda x : convert_temp (x, switch_unit == "Fahrenheit (°F)"))
-            if "Soil Temp (C)" in prediction_df.columns:
-                prediction_df["Soil Temp Display"] = prediction_df["Soil Temp (C)"].apply(lambda x: convert_temp(x, to_faren))
+   
 
 
-            has_uv = "UV Index" in prediction_df.columns and prediction_df["UV Index"].gt(0).any()
-            has_solar = "Solar Radiation (W/m^2)" in prediction_df.columns and prediction_df["Solar Radiation (W/m^2)"].notna().any()
-
+            # Reorganizes the table/graph for clean labels
             avail_column = ["Time", "Display Temp", "Humidity", "Wind", "Precipitation"]
-            if "Soil Temp Display" in prediction_df.columns:
-                avail_column.append("Soil Temp Display")
-            if has_uv:
-                avail_column.append("UV Index")
-            if has_solar:
-                avail_column.append("Solar Radiation (W/m^2)")
-
-
-
             prediction_df.index = prediction_df.index + 1
             prediction_df.sort_index(inplace = True)
             rename_dict = {
-                "Display Temp": filtering["Temperature"],
+                "Display Temp": filtering["Air Temperature"],
                 "Humidity": filtering["Humidity"],
-                "Wind": filtering["Wind"],
+                "Wind": filtering["Wind Speed"],
                 "Precipitation": filtering["Precipitation"]
             }
-            if "Soil Temp Display" in prediction_df.columns:
-                rename_dict["Soil Temp Display"] = filtering["Soil Temp"]
-            if has_uv:
-                rename_dict["UV Index"] = filtering["UV Index"]
-            if has_solar:
-                rename_dict["Solar Radiation (W/m^2)"] = filtering["Solar Radiation"]
+
 
         
+            # Collects the past GDD data and graphs it
+            if not prediction_df.empty:
+                gdd_df = calc_gdd(prediction_df)
+                if planting_date < date.today():
+                    hist_df = historical_data(lat, lon, planting_date.strftime("%Y-%m-%d"), date.today().strftime("%Y-%m-%d"))
+                    hist_df = hist_df[["Date", "GDD"]]
+                    hist_df["Date"] = pd.to_datetime(hist_df["Date"]).dt.date
+                    gdd_df = pd.concat([hist_df, gdd_df], ignore_index=True)
+                    gdd_df = gdd_df[gdd_df["Date"] >= planting_date]
+
+
+                if not gdd_df.empty:
+                    st.subheader("Heat Unit (GDD) Accumulation")
+                    st.write(f"Total GDD since {planting_date}: **{gdd_df['GDD'].sum():.1f}**")
+                    fig = px.bar(gdd_df, x="Date", y="GDD", title="", labels={"GDD": "Heat Units"})
+                    st.plotly_chart(fig, use_container_width=True)
+
             horiz_columns = prediction_df[avail_column].rename(columns=rename_dict)
             horiz_filter_columun = pd.melt(horiz_columns, id_vars=["Time"], var_name="Metric", value_name="Value")
-            selected_horiz_data = [filtering[m] for m in var_select if m in filtering]
+            selected_horiz_data = [filtering[m] for m in selected_data if m in filtering]
             actual_horiz_filtered = horiz_filter_columun[horiz_filter_columun["Metric"].isin(selected_horiz_data)]
 
-
-            if var_select:
-                graph = px.line(
-                    actual_horiz_filtered,
-                    x = "Time",                    
-                    y = "Value",
-                    color = "Metric",   
-                    title  = f"Real time and predicted data at ({lat:.2f}, {lon:.2f})",
-                    markers = True,
-                    line_shape= "spline"
-                    )
-                st.plotly_chart(graph, use_container_width= True)
-            else:
-                 st.info("Select data from the dropdown above to display the graph.")
+            graph = px.line(
+                actual_horiz_filtered,
+                x = "Time",
+                y = "Value",
+                color = "Metric",
+                title  = f"Real time and predicted data at ({lat:.2f}, {lon:.2f})",
+                markers = True,
+                line_shape= "spline"
+            )
+            st.plotly_chart(graph, use_container_width=True)
