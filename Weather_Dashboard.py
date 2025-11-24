@@ -28,8 +28,6 @@ default_end = today + timedelta(days=3)
 sensor_graph_start, sensor_graph_end = st.sidebar.date_input(
 "📅 Date Range for Soil Sensor Data:",
 [default_start, default_end],
-min_value=today - timedelta(days=30),
-max_value=today + timedelta(days=30),
 key = "graph_range"
 )
 
